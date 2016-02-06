@@ -10,6 +10,7 @@ var fsNode = require('fs');
 var fstream = require('fstream');
 var md5 = require('md5');
 
+var cacheVersion = '1';
 
 function CacheDependencyManager (config) {
   this.config = config;
@@ -100,21 +101,21 @@ CacheDependencyManager.prototype.archiveDependencies = function (cacheDirectory,
 
   var dirDest = fsNode.createWriteStream(cachePath);
 
-  function onError(err) {
-    error = 'error tar-ing ' + installedDirectory + ' :' + err;
-    self.cacheLogError(error);
-    onFinally();
+  function onError(error) {
+    self.cacheLogError('error tar-ing ' + installedDirectory + ' :' + error);
+    onFinally(error);
   }
 
   function onEnd() {
     self.cacheLogInfo('installed and archived dependencies');
-    onFinally();
+    onFinally(null);
   }
 
-  function onFinally() {
+  function onFinally(error) {
     if (fs.existsSync(fileBackupDirectory)) {
       fs.removeSync(fileBackupDirectory);
     }
+    callback(error);
   }
 
   var packer = tar.Pack({ noProprietary: true })
@@ -127,9 +128,8 @@ CacheDependencyManager.prototype.archiveDependencies = function (cacheDirectory,
          .pipe(dirDest);
 };
 
-CacheDependencyManager.prototype.extractDependencies = function (cachePath) {
+CacheDependencyManager.prototype.extractDependencies = function (cachePath, callback) {
   var self = this;
-  var error = null;
   var installDirectory = getAbsolutePath(this.config.installDirectory);
   var fileBackupDirectory = getFileBackupPath(installDirectory);
   var targetPath = path.dirname(installDirectory);
@@ -138,9 +138,9 @@ CacheDependencyManager.prototype.extractDependencies = function (cachePath) {
   this.cacheLogInfo('...cleared');
   this.cacheLogInfo('extracting dependencies from ' + cachePath);
 
-  function onError(err) {
-    error = 'Error extracting ' + cachePath + ': ' + err;
-    self.cacheLogError(error);
+  function onError(error) {
+    self.cacheLogError('Error extracting ' + cachePath + ': ' + error);
+    callback(error);
   }
   function onEnd() {
     if (self.config.addToArchiveAndRestore) {
@@ -148,6 +148,7 @@ CacheDependencyManager.prototype.extractDependencies = function (cachePath) {
       fs.removeSync(fileBackupDirectory);
     }
     self.cacheLogInfo('done extracting');
+    callback();
   }
 
   var extractor = tar.Extract({path: targetPath})
@@ -186,6 +187,7 @@ CacheDependencyManager.prototype.loadDependencies = function (callback) {
 
   // Get hash of dependency config file
   var hash = this.config.getFileHash(this.config.configPath);
+  hash = md5(cacheVersion + hash);
   this.cacheLogInfo('hash of ' + this.config.configPath + ': ' + hash);
   // cachePath is absolute path to where local cache of dependencies is located
   var cacheDirectory = path.resolve(this.config.cacheDirectory, this.config.cliName, this.config.getCliVersion());
